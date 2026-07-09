@@ -53,9 +53,9 @@
 
 | 文件 | 状态 |
 |---|---|
-| `packages/travel_agent/prompts/*.py` | ⬜ Step 3 — 提示模板 |
-| `packages/.../nodes/preferences.py` | ⬜ Step 4 — LLM 提取偏好 |
-| `packages/.../nodes/search.py` | ⬜ Step 5 — LLM 模拟搜索 |
+| `packages/travel_agent/prompts/*.py` | ✅ Step 3 — 提示模板 |
+| `packages/.../nodes/preferences.py` | ✅ Step 4 — LLM 提取偏好 |
+| `packages/.../nodes/search.py` | ⬜ Step 5 — LLM 模拟搜索（下一步） |
 | `packages/.../nodes/itinerary.py` | ⬜ Step 6 — LLM 生成行程 |
 | `packages/travel_agent/application/services/*.py` | ⬜ Step 7 — 编排层 |
 | `apps/api/dependencies.py` | ⬜ Step 8 — 依赖注入 |
@@ -167,9 +167,9 @@ TravelPlanResponse (JSON)
 |---|---|---|
 | Step 1 | `settings.py` + `.env.example` | ✅ 已完成 |
 | Step 2 | `llm/factory.py` + `__init__.py` | ✅ 已完成 |
-| Step 3 | `prompts/preferences.py` + `prompts/itinerary.py` | ⬜ 下一步 |
-| Step 4 | 重写 `nodes/preferences.py` | ⬜ |
-| Step 5 | 重写 `nodes/search.py` | ⬜ |
+| Step 3 | `prompts/preferences.py` + `prompts/itinerary.py` | ✅ 已完成 |
+| Step 4 | 重写 `nodes/preferences.py` | ✅ 已完成 |
+| Step 5 | 重写 `nodes/search.py` | ⬜ 下一步 |
 | Step 6 | 重写 `nodes/itinerary.py` | ⬜ |
 | Step 7 | `application/services/travel_agent_service.py` | ⬜ |
 | Step 8 | `apps/api/dependencies.py` | ⬜ |

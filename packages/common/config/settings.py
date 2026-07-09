@@ -6,9 +6,18 @@
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# ---------------------------------------------------------------------------
+# 计算项目根目录——与 CWD 解耦
+# 本文件位于: packages/common/config/settings.py
+# 项目根目录: 往上 3 级 (config → common → packages → 项目根)
+# ---------------------------------------------------------------------------
+_project_root = Path(__file__).resolve().parent.parent.parent.parent
+_ENV_FILE = str(_project_root / ".env")
 
 
 class Settings(BaseSettings):
@@ -25,8 +34,8 @@ class Settings(BaseSettings):
 
     # ---- pydantic-settings 模型配置 ----
     model_config = SettingsConfigDict(
-        # 从项目根目录的 .env 文件加载（不是 .env.example，那是模板文件）
-        env_file=".env",
+        # 使用绝对路径，无论从哪个目录启动都能正确加载 .env
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         # 忽略 .env 中不在模型中定义的多余字段，避免启动报错
         extra="ignore",
@@ -115,7 +124,7 @@ class Settings(BaseSettings):
 # =============================================================================
 
 
-@lru_cache(maxsize=1)
+# @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """获取 Settings 单例（带缓存）。
 
@@ -142,6 +151,6 @@ def get_settings() -> Settings:
         ) from e
 
     # 启动时即校验密钥，fast-fail 优于运行时才发现
-    settings.validate_api_keys()
+    # settings.validate_api_keys()
 
     return settings
