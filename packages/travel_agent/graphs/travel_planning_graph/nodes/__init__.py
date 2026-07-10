@@ -5,6 +5,7 @@ from travel_agent.graphs.travel_planning_graph.nodes.search import (
     search_flights,
     search_hotels,
     search_attractions,
+    search_all_parallel,
 )
 from travel_agent.graphs.travel_planning_graph.nodes.itinerary import build_itinerary
 
@@ -13,5 +14,6 @@ __all__ = [
     "search_flights",
     "search_hotels",
     "search_attractions",
+    "search_all_parallel",
     "build_itinerary",
 ]
