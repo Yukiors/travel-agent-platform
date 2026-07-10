@@ -12,7 +12,7 @@ class TravelPreference(BaseModel):
     destination: str = Field(..., description="Target destination")
     start_date: str = Field(..., description="Travel start date (YYYY-MM-DD)")
     end_date: str = Field(..., description="Travel end date (YYYY-MM-DD)")
-    budget: Optional[float] = Field(None, description="Total budget in USD")
+    budget: Optional[float] = Field(None, description="Total budget in CNY")
     interests: list[str] = Field(default_factory=list, description="Travel interests")
     num_travelers: int = Field(default=1, ge=1, description="Number of travelers")
 
@@ -30,5 +30,13 @@ class TravelPlanResponse(BaseModel):
     plan_id: str
     destination: str
     itinerary: list[dict]
+    final_plan: dict
     total_budget_estimate: float
     created_at: datetime
+
+
+class TravelPlanStreamResponse(BaseModel):
+    """Stream response for travel plan generation."""
+
+    event_type: str
+    data: dict

@@ -35,6 +35,7 @@ class TravelPlanningState:
 
     # Final output
     itinerary: list[dict] = field(default_factory=list)
+    final_plan: dict = field(default_factory=dict)
     total_budget_estimate: float = 0.0
 
     # Routing
