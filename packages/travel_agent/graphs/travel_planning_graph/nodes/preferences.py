@@ -82,6 +82,7 @@ async def gather_preferences(state: TravelPlanningState) -> dict:
             - destination, start_date, end_date, budget,
               num_travelers, interests
     """
+    import sys
     # =========================================================================
     # 第 1 步：从对话历史中取出最后一条用户消息
     # =========================================================================
@@ -90,6 +91,10 @@ async def gather_preferences(state: TravelPlanningState) -> dict:
     user_messages = [
         m for m in state.messages if isinstance(m, HumanMessage)
     ]
+    print(f"GATHER_DEBUG: total_messages={len(state.messages)}, human_messages={len(user_messages)}", file=sys.stderr, flush=True)
+    if user_messages:
+        raw = str(user_messages[-1].content)
+        print(f"GATHER_DEBUG: last_user_msg_len={len(raw)}, has_dest={'杭州' in raw}, has_cn={any('一' <= c <= '鿿' for c in raw)}", file=sys.stderr, flush=True)
 
     # 如果没有找到任何用户消息（异常情况，如空 state 直接调用），
     # 返回一条提示消息并终止 graph（next_step=""）。
@@ -117,7 +122,17 @@ async def gather_preferences(state: TravelPlanningState) -> dict:
     ]
 
     # 异步调用 LLM，不阻塞事件循环
-    response = await llm.ainvoke(prompt)
+    # 捕获 LLM API 调用异常（网络错误、认证失败、限流等），
+    # 避免异常传播到 LangGraph 层导致 500。
+    try:
+        response = await llm.ainvoke(prompt)
+    except Exception as e:
+        return {
+            "messages": [
+                AIMessage(content=f"服务暂时不可用，请稍后重试。")
+            ],
+            "next_step": "",  # 终止 graph
+        }
 
     # =========================================================================
     # 第 3 步：清洗 LLM 原始输出，解析为 JSON
@@ -148,6 +163,7 @@ async def gather_preferences(state: TravelPlanningState) -> dict:
     #
     # 使用 .get() 安全取值并设默认值——防御 LLM 漏字段的情况。
     is_complete = data.get("is_complete", False)
+    print(f"GATHER_DEBUG: is_complete={is_complete}, data_keys={list(data.keys())}", file=sys.stderr, flush=True)
 
     if is_complete:
         # ----- 分支 A：信息完整，写入 state 并路由到搜索阶段 -----
@@ -164,7 +180,7 @@ async def gather_preferences(state: TravelPlanningState) -> dict:
             "num_travelers": data.get("num_travelers", 1),  # 默认 1 人
             "interests": data.get("interests", []),  # 默认无特殊偏好
             # 路由到第一个搜索节点
-            "next_step": "search_flights",
+            "next_step": "search_all_parallel",
         }
     else:
         # ----- 分支 B：信息不完整，返回 LLM 生成的追问 -----

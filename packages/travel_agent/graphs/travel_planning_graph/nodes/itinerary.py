@@ -81,8 +81,14 @@ async def build_itinerary(state: TravelPlanningState) -> dict:
     attractions = state.attractions
 
     # 计算旅行天数，用于生成对应天数的行程安排
-    start = datetime.strptime(start_date, "%Y-%m-%d")
-    end = datetime.strptime(end_date, "%Y-%m-%d")
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return {
+            "messages": [AIMessage(content="日期格式有误，请重新输入。")],
+            "next_step": "",
+        }
     num_days = (end - start).days + 1
 
     # 将航班、酒店、景点数据格式化为易读的字符串，便于 LLM 理解
@@ -98,7 +104,13 @@ async def build_itinerary(state: TravelPlanningState) -> dict:
 
     # 获取 LLM 实例并调用生成行程
     llm = get_llm(fast=True)
-    response = await llm.ainvoke(prompt)
+    try:
+        response = await llm.ainvoke(prompt)
+    except Exception:
+        return {
+            "messages": [AIMessage(content="服务暂时不可用，请稍后重试。")],
+            "next_step": "",
+        }
     # 清洗返回内容，去除可能存在的 markdown 代码块包裹
     json_str = _clean_json_response(str(response.content))
 

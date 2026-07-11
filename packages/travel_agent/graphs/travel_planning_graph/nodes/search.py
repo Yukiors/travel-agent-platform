@@ -68,11 +68,15 @@ async def _search_flights_internal(state: TravelPlanningState) -> dict:
                                                  budget=budget, num_travelers=num_travelers, interests=interests)),
     ]
 
-    response = await llm.ainvoke(prompt)
-    response = _clean_json_response(str(response.content))
+    try:
+        response = await llm.ainvoke(prompt)
+    except Exception:
+        return {"flights": None, "error": True}
+
+    response_text = _clean_json_response(str(response.content))
 
     try:
-        data = json.loads(response)
+        data = json.loads(response_text)
         return {"flights": data}
     except json.JSONDecodeError:
         return {"flights": None, "error": True}
@@ -103,11 +107,15 @@ async def _search_hotels_internal(state: TravelPlanningState) -> dict:
                                                 budget=budget, num_travelers=num_travelers, interests=interests)),
     ]
 
-    response = await llm.ainvoke(prompt)
-    response = _clean_json_response(str(response.content))
+    try:
+        response = await llm.ainvoke(prompt)
+    except Exception:
+        return {"hotels": None, "error": True}
+
+    response_text = _clean_json_response(str(response.content))
 
     try:
-        data = json.loads(response)
+        data = json.loads(response_text)
         return {"hotels": data}
     except json.JSONDecodeError:
         return {"hotels": None, "error": True}
@@ -129,8 +137,11 @@ async def _search_attractions_internal(state: TravelPlanningState) -> dict:
     num_travelers = state.num_travelers
     interests = state.interests
 
-    start = datetime.strptime(start_date, "%Y-%m-%d")
-    end = datetime.strptime(end_date, "%Y-%m-%d")
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return {"attractions": None, "error": True}
     num_days = (end - start).days + 1
     total_recommendations = num_days * 3
 
@@ -144,11 +155,15 @@ async def _search_attractions_internal(state: TravelPlanningState) -> dict:
                                                      interests=interests, total_recommendations=total_recommendations)),
     ]
 
-    response = await llm.ainvoke(prompt)
-    response = _clean_json_response(str(response.content))
+    try:
+        response = await llm.ainvoke(prompt)
+    except Exception:
+        return {"attractions": None, "error": True}
+
+    response_text = _clean_json_response(str(response.content))
 
     try:
-        data = json.loads(response)
+        data = json.loads(response_text)
         return {"attractions": data}
     except json.JSONDecodeError:
         return {"attractions": None, "error": True}

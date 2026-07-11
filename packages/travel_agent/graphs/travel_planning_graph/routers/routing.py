@@ -10,7 +10,11 @@ def route_after_gather(state: TravelPlanningState) -> str:
 
     Returns the name of the next node to execute, or END if complete.
     """
-    return state.next_step or "search_flights"
+    # 显式检查 next_step 是否为空——空字符串在 Python 中是 falsy，
+    # 不能用 `or` 短路求值，否则 next_step="" 会被误路由到搜索节点。
+    if not state.next_step:
+        return END
+    return state.next_step
 
 
 def route_after_search(state: TravelPlanningState) -> str:

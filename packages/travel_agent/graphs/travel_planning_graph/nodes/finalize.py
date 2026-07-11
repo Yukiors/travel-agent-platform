@@ -78,8 +78,14 @@ async def finalize_plan(state: TravelPlanningState) -> dict:
     itinerary = state.itinerary
 
     # 计算旅行天数
-    start = datetime.strptime(start_date, "%Y-%m-%d")
-    end = datetime.strptime(end_date, "%Y-%m-%d")
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return {
+            "messages": [AIMessage(content="日期格式有误，请重新输入。")],
+            "next_step": "",
+        }
     num_days = (end - start).days + 1
 
     # 将行程数据格式化为易读的字符串，便于 LLM 理解和审核
@@ -93,7 +99,13 @@ async def finalize_plan(state: TravelPlanningState) -> dict:
 
     # 获取 LLM 实例并调用生成最终确认
     llm = get_llm(fast=True)
-    response = await llm.ainvoke(prompt)
+    try:
+        response = await llm.ainvoke(prompt)
+    except Exception:
+        return {
+            "messages": [AIMessage(content="服务暂时不可用，请稍后重试。")],
+            "next_step": "",
+        }
     # 清洗返回内容，去除可能存在的 markdown 代码块包裹
     json_str = _clean_json_response(str(response.content))
 
