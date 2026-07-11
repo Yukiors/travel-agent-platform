@@ -1,0 +1,33 @@
+from .preferences import (
+    AttractionItem,
+    AttractionSearchResult,
+    BudgetAnalysis,
+    BudgetItem,
+    DailyActivity,
+    DayPlan,
+    FinalizedPlan,
+    FlightOption,
+    FlightSearchResult,
+    HotelOption,
+    HotelSearchResult,
+    ItineraryResult,
+    TravelPreferenceExtraction,
+    ValidTravelRequest,
+)
+
+__all__ = [
+    "TravelPreferenceExtraction",
+    "ValidTravelRequest",
+    "FlightOption",
+    "FlightSearchResult",
+    "HotelOption",
+    "HotelSearchResult",
+    "AttractionItem",
+    "AttractionSearchResult",
+    "DailyActivity",
+    "DayPlan",
+    "ItineraryResult",
+    "BudgetItem",
+    "BudgetAnalysis",
+    "FinalizedPlan",
+]

@@ -1,46 +1,22 @@
 """Nodes for searching flights, hotels, and attractions."""
 
 import asyncio
-import json
 from datetime import datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from travel_agent.graphs.travel_planning_graph.state import TravelPlanningState
 from travel_agent.llm import get_llm
-from travel_agent.prompts import FLIGHTS_SYSTEM_PROMPT, FLIGHTS_USER_TEMPLATE, HOTELS_SYSTEM_PROMPT, \
-    HOTELS_USER_TEMPLATE, ATTRACTIONS_SYSTEM_PROMPT, ATTRACTIONS_USER_TEMPLATE
-
-
-def _clean_json_response(raw: str) -> str:
-    """清洗 LLM 返回的原始字符串，去除 markdown 代码块包裹和首尾空白。
-
-    LLM 经常不按指令直接输出裸 JSON，而是用 markdown 代码块包裹，
-    如 ```json ... ``` 或 ``` ... ```。本函数负责将这些包裹剥掉，
-    返回纯 JSON 字符串供 json.loads 解析。
-
-    Args:
-        raw: LLM 返回的原始字符串，可能包含 markdown 代码块。
-
-    Returns:
-        去除代码块标记和首尾空白后的纯 JSON 字符串。
-
-    处理示例:
-        "```json\\n{\"a\": 1}\\n```" → "{\"a\": 1}"
-        "  \\n```\\n{\"a\": 1}\\n```\\n  " → "{\"a\": 1}"
-        "{\"a\": 1}" → "{\"a\": 1}"
-    """
-    raw = raw.strip()
-
-    if raw.startswith("```"):
-        first_newline = raw.find("\n")
-        if first_newline != -1:
-            raw = raw[first_newline + 1:]
-
-        if raw.endswith("```"):
-            raw = raw[:-3]
-
-    return raw.strip()
+from travel_agent.llm.structured import StructuredOutputError, invoke_structured_json
+from travel_agent.prompts import (
+    ATTRACTIONS_SYSTEM_PROMPT,
+    ATTRACTIONS_USER_TEMPLATE,
+    FLIGHTS_SYSTEM_PROMPT,
+    FLIGHTS_USER_TEMPLATE,
+    HOTELS_SYSTEM_PROMPT,
+    HOTELS_USER_TEMPLATE,
+)
+from travel_agent.schemas import AttractionSearchResult, FlightSearchResult, HotelSearchResult
 
 
 async def _search_flights_internal(state: TravelPlanningState) -> dict:
@@ -69,16 +45,9 @@ async def _search_flights_internal(state: TravelPlanningState) -> dict:
     ]
 
     try:
-        response = await llm.ainvoke(prompt)
-    except Exception:
-        return {"flights": None, "error": True}
-
-    response_text = _clean_json_response(str(response.content))
-
-    try:
-        data = json.loads(response_text)
-        return {"flights": data}
-    except json.JSONDecodeError:
+        data = invoke_structured_json(llm=llm, schema=FlightSearchResult, messages=prompt)
+        return {"flights": data.flights}
+    except StructuredOutputError:
         return {"flights": None, "error": True}
 
 
@@ -106,18 +75,10 @@ async def _search_hotels_internal(state: TravelPlanningState) -> dict:
             content=HOTELS_USER_TEMPLATE.format(destination=destination, start_date=start_date, end_date=end_date,
                                                 budget=budget, num_travelers=num_travelers, interests=interests)),
     ]
-
     try:
-        response = await llm.ainvoke(prompt)
-    except Exception:
-        return {"hotels": None, "error": True}
-
-    response_text = _clean_json_response(str(response.content))
-
-    try:
-        data = json.loads(response_text)
-        return {"hotels": data}
-    except json.JSONDecodeError:
+        data = invoke_structured_json(llm=llm, schema=HotelSearchResult, messages=prompt)
+        return {"hotels": data.hotels}
+    except StructuredOutputError:
         return {"hotels": None, "error": True}
 
 
@@ -156,16 +117,9 @@ async def _search_attractions_internal(state: TravelPlanningState) -> dict:
     ]
 
     try:
-        response = await llm.ainvoke(prompt)
-    except Exception:
-        return {"attractions": None, "error": True}
-
-    response_text = _clean_json_response(str(response.content))
-
-    try:
-        data = json.loads(response_text)
-        return {"attractions": data}
-    except json.JSONDecodeError:
+        data = invoke_structured_json(llm=llm, schema=AttractionSearchResult, messages=prompt)
+        return {"attractions": data.attractions}
+    except StructuredOutputError:
         return {"attractions": None, "error": True}
 
 

@@ -8,5 +8,6 @@ Provides:
 """
 
 from .factory import LLMFactory, get_llm
+from .structured import invoke_structured_json
 
-__all__ = ["LLMFactory", "get_llm"]
+__all__ = ["LLMFactory", "get_llm", "invoke_structured_json"]

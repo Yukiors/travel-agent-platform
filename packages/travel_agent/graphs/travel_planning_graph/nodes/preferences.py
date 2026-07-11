@@ -10,49 +10,24 @@
         └─ is_complete=false → 返回澄清问题, next_step="" (graph END)
 """
 
-import json
-
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
+from pydantic import ValidationError
 from travel_agent.graphs.travel_planning_graph.state import TravelPlanningState
 from travel_agent.llm import get_llm
 from travel_agent.prompts import PREFERENCES_SYSTEM_PROMPT, PREFERENCES_USER_TEMPLATE
+from travel_agent.llm.structured import invoke_structured_json, StructuredOutputError
+from travel_agent.schemas import TravelPreferenceExtraction, ValidTravelRequest
+
+REQUIRED_FIELDS: dict[str, str] = {
+    "destination": "目的地",
+    "start_date": "出发日期",
+    "end_date": "返程日期",
+}
 
 
-def _clean_json_response(raw: str) -> str:
-    """清洗 LLM 返回的原始字符串，去除 markdown 代码块包裹和首尾空白。
-
-    LLM 经常不按指令直接输出裸 JSON，而是用 markdown 代码块包裹，
-    如 ```json ... ``` 或 ``` ... ```。本函数负责将这些包裹剥掉，
-    返回纯 JSON 字符串供 json.loads 解析。
-
-    Args:
-        raw: LLM 返回的原始字符串，可能包含 markdown 代码块。
-
-    Returns:
-        去除代码块标记和首尾空白后的纯 JSON 字符串。
-
-    处理示例:
-        "```json\\n{\"a\": 1}\\n```" → "{\"a\": 1}"
-        "  \\n```\\n{\"a\": 1}\\n```\\n  " → "{\"a\": 1}"
-        "{\"a\": 1}" → "{\"a\": 1}"
-    """
-    # 先做一次 strip，去掉首尾空白和换行
-    raw = raw.strip()
-
-    # 检查是否以 ``` 开头（兼容 ``` 和 ```json 两种写法）
-    if raw.startswith("```"):
-        # 找到第一个换行符的位置，跳过整个 fence 行
-        first_newline = raw.find("\n")
-        if first_newline != -1:
-            raw = raw[first_newline + 1:]  # 去掉 ```json 这一整行
-
-        # 去掉末尾的 ```（可能在最后一行或紧贴内容）
-        if raw.endswith("```"):
-            raw = raw[:-3]
-
-    # 再次 strip，去除 fence 行剥离后可能残留的空白
-    return raw.strip()
+def build_clarifying_question(missing_fields: list[str]) -> str:
+    labels = [REQUIRED_FIELDS.get(f, f) for f in missing_fields]
+    return f"请补充以下旅行信息：{'、'.join(labels)}。"
 
 
 async def gather_preferences(state: TravelPlanningState) -> dict:
@@ -91,10 +66,13 @@ async def gather_preferences(state: TravelPlanningState) -> dict:
     user_messages = [
         m for m in state.messages if isinstance(m, HumanMessage)
     ]
-    print(f"GATHER_DEBUG: total_messages={len(state.messages)}, human_messages={len(user_messages)}", file=sys.stderr, flush=True)
+    print(f"GATHER_DEBUG: total_messages={len(state.messages)}, human_messages={len(user_messages)}", file=sys.stderr,
+          flush=True)
     if user_messages:
         raw = str(user_messages[-1].content)
-        print(f"GATHER_DEBUG: last_user_msg_len={len(raw)}, has_dest={'杭州' in raw}, has_cn={any('一' <= c <= '鿿' for c in raw)}", file=sys.stderr, flush=True)
+        print(
+            f"GATHER_DEBUG: last_user_msg_len={len(raw)}, has_dest={'杭州' in raw}, has_cn={any('一' <= c <= '鿿' for c in raw)}",
+            file=sys.stderr, flush=True)
 
     # 如果没有找到任何用户消息（异常情况，如空 state 直接调用），
     # 返回一条提示消息并终止 graph（next_step=""）。
@@ -121,29 +99,11 @@ async def gather_preferences(state: TravelPlanningState) -> dict:
         )),
     ]
 
-    # 异步调用 LLM，不阻塞事件循环
-    # 捕获 LLM API 调用异常（网络错误、认证失败、限流等），
-    # 避免异常传播到 LangGraph 层导致 500。
     try:
-        response = await llm.ainvoke(prompt)
-    except Exception as e:
-        return {
-            "messages": [
-                AIMessage(content=f"服务暂时不可用，请稍后重试。")
-            ],
-            "next_step": "",  # 终止 graph
-        }
-
-    # =========================================================================
-    # 第 3 步：清洗 LLM 原始输出，解析为 JSON
-    # =========================================================================
-    # response.content 是 LLM 返回的原始字符串，可能被 markdown 代码块包裹。
-    # _clean_json_response 负责剥掉 ```json ... ``` 等包裹，返回纯 JSON。
-    response_content = _clean_json_response(str(response.content))
-
-    try:
-        data = json.loads(response_content)
-    except json.JSONDecodeError:
+        extracted = invoke_structured_json(llm=llm,
+                                           schema=TravelPreferenceExtraction,
+                                           messages=prompt)
+    except StructuredOutputError:
         # JSON 解析失败——LLM 返回格式不符合预期。
         # 返回通用错误消息并以 next_step="" 终止 graph，
         # 避免将无效数据传播到下游节点。
@@ -162,36 +122,52 @@ async def gather_preferences(state: TravelPlanningState) -> dict:
     #   - false: 缺少任一必填字段
     #
     # 使用 .get() 安全取值并设默认值——防御 LLM 漏字段的情况。
-    is_complete = data.get("is_complete", False)
-    print(f"GATHER_DEBUG: is_complete={is_complete}, data_keys={list(data.keys())}", file=sys.stderr, flush=True)
-
-    if is_complete:
-        # ----- 分支 A：信息完整，写入 state 并路由到搜索阶段 -----
-        return {
-            # 用户可见的确认消息
-            "messages": [
-                AIMessage(content="已了解您的需求，正在为您搜索...")
-            ],
-            # 将 LLM 提取的偏好写入 state 对应字段
-            "destination": data.get("destination", ""),
-            "start_date": data.get("start_date", ""),
-            "end_date": data.get("end_date", ""),
-            "budget": data.get("budget"),  # None 表示用户未指定预算
-            "num_travelers": data.get("num_travelers", 1),  # 默认 1 人
-            "interests": data.get("interests", []),  # 默认无特殊偏好
-            # 路由到第一个搜索节点
-            "next_step": "search_all_parallel",
-        }
-    else:
-        # ----- 分支 B：信息不完整，返回 LLM 生成的追问 -----
-        # clarifying_question 由 LLM 在 prompt 中根据缺失字段生成，
-        # 语气自然友好，例如 "请问您计划什么时候出发呢？"
-        clarifying_question = data.get(
-            "clarifying_question",
-            "请补充更多旅行信息。"  # fallback：LLM 漏字段时的默认追问
+    missing_fields = [
+        field_name
+        for field_name in REQUIRED_FIELDS
+        if getattr(extracted, field_name) is None
+    ]
+    if missing_fields:
+        # ----- 分支 B：信息不完整，提示用户补充信息 -----
+        question = (
+                extracted.clarifying_question
+                or build_clarifying_question(missing_fields)
         )
+
         return {
-            "messages": [AIMessage(content=clarifying_question)],
-            "next_step": "",  # 空字符串 → router 返回 END → graph 停止
-            # 用户看到追问后可再次发送消息补全信息
+            "messages": [AIMessage(content=question)],
+            "next_step": "",
         }
+    try:
+        request = ValidTravelRequest(
+            destination=extracted.destination,
+            start_date=extracted.start_date,
+            end_date=extracted.end_date,
+            budget=extracted.budget,
+            num_travelers=extracted.num_travelers,
+            interests=extracted.interests,
+        )
+    except ValidationError as exc:
+        errors = "; ".join(
+            error["msg"]
+            for error in exc.errors()
+        )
+
+        return {
+            "messages": [
+                AIMessage(content=f"旅行信息存在问题：{errors}。请重新确认。")
+            ],
+            "next_step": "",
+        }
+
+        # mode="json" 会将 date 转换为 YYYY-MM-DD 字符串，
+        # 与当前 TravelPlanningState 保持兼容。
+    data = request.model_dump(mode="json")
+
+    return {
+        "messages": [
+            AIMessage(content="已了解您的需求，正在为您搜索...")
+        ],
+        **data,
+        "next_step": "search_all_parallel",
+    }
