@@ -75,9 +75,9 @@ async def build_itinerary(state: TravelPlanningState) -> dict:
     # 获取 LLM 实例并调用生成行程
     llm = get_llm(fast=True)
     try:
-        data = invoke_structured_json(llm=llm,
-                                      schema=ItineraryResult,
-                                      messages=prompt)
+        data = await invoke_structured_json(llm=llm,
+                                           schema=ItineraryResult,
+                                           messages=prompt)
         # model_dump(mode="json") 将 Pydantic 模型转为 JSON-safe dict，
         # 与 TravelPlanningState 的 list[dict] 类型兼容。
         itinerary = [day.model_dump(mode="json") for day in data.itinerary]

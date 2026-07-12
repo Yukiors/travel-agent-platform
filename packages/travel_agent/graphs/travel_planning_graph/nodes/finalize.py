@@ -69,7 +69,7 @@ async def finalize_plan(state: TravelPlanningState) -> dict:
     # 获取 LLM 实例并调用生成最终确认
     llm = get_llm(fast=True)
     try:
-        final_plan = invoke_structured_json(
+        final_plan = await invoke_structured_json(
             llm=llm,
             schema=FinalizedPlan,
             messages=prompt,

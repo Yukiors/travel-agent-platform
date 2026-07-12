@@ -1,9 +1,10 @@
 """Travel planning API routes."""
 
+import json
 import logging
 import traceback
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
@@ -33,12 +34,69 @@ def get_graph():
     return _graph
 
 
-def _safe_get(result, key, default):
-    """安全地从 result 中取值，兼容 dict 和 dataclass/object 两种返回类型。
+def _build_user_message(request: TravelPlanRequest) -> str:
+    """从请求中的结构化偏好构建用户消息字符串。"""
+    prefs = request.preferences
+    parts = [f"我想去{prefs.destination}旅游"]
 
-    LangGraph 的 ainvoke 在不同版本中可能返回 dict 或 typed state 实例。
-    本函数同时支持 .get()（dict）和 getattr()（object）两种访问方式。
+    if prefs.start_date and prefs.end_date:
+        parts.append(f"从{prefs.start_date}到{prefs.end_date}")
+    if prefs.budget:
+        parts.append(f"预算{prefs.budget}元/人")
+    if prefs.num_travelers and prefs.num_travelers > 1:
+        parts.append(f"{prefs.num_travelers}个人")
+    if prefs.interests:
+        parts.append(f"喜欢{','.join(prefs.interests)}")
+
+    return "，".join(parts)
+
+
+def _is_preferences_complete(prefs) -> bool:
+    """检查结构化偏好是否包含三个必填字段。"""
+    return bool(prefs.destination and prefs.start_date and prefs.end_date)
+
+
+def _build_initial_state(request: TravelPlanRequest) -> dict:
+    """构建图执行的初始状态。
+
+    当 API 收到完整的结构化偏好时（destination + start_date + end_date 齐全），
+    直接将偏好写入初始 state，绕过 gather_preferences 节点的 LLM 提取，
+    让图直接进入 search_all_parallel 阶段。
+
+    偏好不完整时仅包含用户消息，让 gather_preferences 节点走 LLM 提取流程。
     """
+    prefs = request.preferences
+
+    if _is_preferences_complete(prefs):
+        # 结构化直通：偏好完整 → 直接写入 state，跳过提取LLM
+        try:
+            sd = date.fromisoformat(prefs.start_date) if isinstance(prefs.start_date, str) else prefs.start_date
+            ed = date.fromisoformat(prefs.end_date) if isinstance(prefs.end_date, str) else prefs.end_date
+        except (ValueError, TypeError):
+            # 日期格式无效 → 回退到 LLM 提取
+            return {
+                "messages": [HumanMessage(content=_build_user_message(request))]
+            }
+
+        return {
+            "messages": [HumanMessage(content=_build_user_message(request))],
+            "destination": prefs.destination,
+            "start_date": str(sd),
+            "end_date": str(ed),
+            "budget": prefs.budget,
+            "num_travelers": prefs.num_travelers or 1,
+            "interests": prefs.interests or [],
+            "next_step": "search_all_parallel",
+        }
+
+    # 偏好不完整 → 走 LLM 提取流程
+    return {
+        "messages": [HumanMessage(content=_build_user_message(request))]
+    }
+
+
+def _safe_get(result, key, default):
+    """安全地从 result 中取值，兼容 dict 和 dataclass/object 两种返回类型。"""
     if isinstance(result, dict):
         return result.get(key, default)
     return getattr(result, key, default)
@@ -46,28 +104,21 @@ def _safe_get(result, key, default):
 
 @router.post("/plan", response_model=TravelPlanResponse)
 async def create_travel_plan(request: TravelPlanRequest) -> TravelPlanResponse:
-    """生成旅行计划。"""
+    """生成旅行计划。
+
+    当请求中 destination、start_date、end_date 齐全时，
+    绕过偏好提取 LLM，直接进入搜索阶段以节省延迟和成本。
+    """
     graph = get_graph()
 
-    # 构建用户消息
-    user_message = f"我想去{request.preferences.destination}旅游，从{request.preferences.start_date}到{request.preferences.end_date}"
-    if request.preferences.budget:
-        user_message += f"，预算{request.preferences.budget}元/人"
-    if request.preferences.num_travelers > 1:
-        user_message += f"，{request.preferences.num_travelers}个人"
-    if request.preferences.interests:
-        user_message += f"，喜欢{','.join(request.preferences.interests)}"
+    # 构建初始状态（支持结构化直通）
+    initial_state = _build_initial_state(request)
 
-    # 初始状态
-    initial_state = {
-        "messages": [HumanMessage(content=user_message)]
-    }
-
-    # 生成配置
+    # 生成配置 — conversation_id 用于多轮会话状态持久化
     plan_id = request.conversation_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": plan_id}}
 
-    # 执行图——捕获所有异常以避免 500
+    # 执行图
     try:
         result = await graph.ainvoke(initial_state, config)
     except Exception as e:
@@ -77,13 +128,14 @@ async def create_travel_plan(request: TravelPlanRequest) -> TravelPlanResponse:
             detail=f"旅行规划服务暂时不可用: {str(e)}",
         )
 
-    # 构建响应——使用 _safe_get 兼容 dict 和 dataclass 两种返回类型
+    # 构建响应
     try:
-        import sys
         msgs = _safe_get(result, "messages", [])
-        print(f"DEBUG messages count={len(msgs)}, next_step={_safe_get(result,'next_step','')!r}", file=sys.stderr, flush=True)
-        for i, m in enumerate(msgs):
-            print(f"DEBUG msg[{i}]: {str(m.content)[:200]}", file=sys.stderr, flush=True)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "messages count=%d, next_step=%r",
+                len(msgs), _safe_get(result, "next_step", ""),
+            )
         return TravelPlanResponse(
             plan_id=plan_id,
             destination=_safe_get(result, "destination", ""),
@@ -105,32 +157,16 @@ async def create_travel_plan_stream(request: TravelPlanRequest):
     """流式生成旅行计划。"""
     graph = get_graph()
 
-    # 构建用户消息
-    user_message = f"我想去{request.preferences.destination}旅游，从{request.preferences.start_date}到{request.preferences.end_date}"
-    if request.preferences.budget:
-        user_message += f"，预算{request.preferences.budget}元/人"
-    if request.preferences.num_travelers > 1:
-        user_message += f"，{request.preferences.num_travelers}个人"
-    if request.preferences.interests:
-        user_message += f"，喜欢{','.join(request.preferences.interests)}"
+    initial_state = _build_initial_state(request)
 
-    # 初始状态
-    initial_state = {
-        "messages": [HumanMessage(content=user_message)]
-    }
-
-    # 生成配置
     plan_id = request.conversation_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": plan_id}}
 
     async def event_generator() -> AsyncGenerator[str, None]:
         """生成服务端事件流。"""
-        import json
-
         try:
             async for event in graph.astream(initial_state, config):
-                # 发送当前节点状态
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
         except Exception as e:
             logger.error(f"流式规划执行失败: {e}\n{traceback.format_exc()}")
             error_data = json.dumps(
@@ -139,7 +175,6 @@ async def create_travel_plan_stream(request: TravelPlanRequest):
             )
             yield f"data: {error_data}\n\n"
 
-        # 发送完成标记
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

@@ -1,8 +1,10 @@
 from .preferences import (
+    ActivityType,
     AttractionItem,
     AttractionSearchResult,
+    AttractionType,
     BudgetAnalysis,
-    BudgetItem,
+    BudgetBreakdown,
     DailyActivity,
     DayPlan,
     FinalizedPlan,
@@ -18,6 +20,8 @@ from .preferences import (
 __all__ = [
     "TravelPreferenceExtraction",
     "ValidTravelRequest",
+    "ActivityType",
+    "AttractionType",
     "FlightOption",
     "FlightSearchResult",
     "HotelOption",
@@ -27,7 +31,7 @@ __all__ = [
     "DailyActivity",
     "DayPlan",
     "ItineraryResult",
-    "BudgetItem",
+    "BudgetBreakdown",
     "BudgetAnalysis",
     "FinalizedPlan",
 ]
